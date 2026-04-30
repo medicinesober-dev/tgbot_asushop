@@ -245,10 +245,18 @@ async def select_period(callback: types.CallbackQuery):
         text = f"<b>{product[1]}</b>\nПериод: {product[5]}\nЦена: {product[3]} ₽\n{product[4]}\n\nПодтвердите покупку:"
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
-@dp.callback_query(F.data.startswith("buy_") and ("_gift" in callback.data or "_game" in callback.data))
-async def buy_direct(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    product_id = int(parts[1])
+@dp.callback_query(F.data.startswith("buy_") & F.data.endswith("_gift"))
+async def buy_gift(callback: types.CallbackQuery):
+    product_id = int(callback.data.split("_")[1])
+    product = await get_product_by_id(product_id)
+    if product:
+        kb = get_buy_keyboard(product_id, None, product[3])
+        text = f"<b>{product[1]}</b>\nЦена: {product[3]} ₽\n{product[4]}\n\nПодтвердите покупку:"
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("buy_") & F.data.endswith("_game"))
+async def buy_game(callback: types.CallbackQuery):
+    product_id = int(callback.data.split("_")[1])
     product = await get_product_by_id(product_id)
     if product:
         kb = get_buy_keyboard(product_id, None, product[3])
