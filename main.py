@@ -114,10 +114,11 @@ async def buy_callback(callback: types.CallbackQuery):
     await create_order(user_id, product_id)
     await callback.message.answer("✅ Покупка успешно оформлена! Менеджер свяжется с вами.")
 
-async def on_startup():
+# Исправлено: функции принимают аргумент app
+async def on_startup(app):
     await bot.set_webhook(WEBHOOK_URL)
 
-async def on_shutdown():
+async def on_shutdown(app):
     await bot.delete_webhook()
 
 async def handle_update(request: web.Request):
