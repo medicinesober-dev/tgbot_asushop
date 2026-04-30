@@ -3,10 +3,8 @@ import logging
 import os
 import aiosqlite
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.filters import Command
+from aiogram.types import KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram.types import Update
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -28,18 +26,11 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-class ProductState(StatesGroup):
-    selecting_category = State()
-    selecting_service = State()
-    selecting_period = State()
-    confirming_purchase = State()
-
 async def db_start():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE, balance REAL DEFAULT 0.0)")
         await db.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, price TEXT, description TEXT, service_type TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, product_id INTEGER, period TEXT, amount REAL, status TEXT DEFAULT 'completed', date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        
         cursor = await db.execute("SELECT COUNT(*) FROM products")
         count = (await cursor.fetchone())[0]
         if count == 0:
@@ -115,7 +106,11 @@ def get_catalog_keyboard():
     return kb.as_markup()
 
 def get_services_keyboard(category):
-    products = get_products_by_category_sync(category)
+    import sqlite3
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.execute("SELECT * FROM products WHERE category=?", (category,))
+    products = cursor.fetchall()
+    conn.close()
     kb = InlineKeyboardBuilder()
     seen = set()
     for prod in products:
@@ -128,7 +123,11 @@ def get_services_keyboard(category):
     return kb.as_markup()
 
 def get_periods_keyboard(service_name):
-    products = get_products_by_category_sync("foreign_services")
+    import sqlite3
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.execute("SELECT * FROM products WHERE category='foreign_services'")
+    products = cursor.fetchall()
+    conn.close()
     kb = InlineKeyboardBuilder()
     for prod in products:
         if prod[1] == service_name and prod[5]:
@@ -138,7 +137,11 @@ def get_periods_keyboard(service_name):
     return kb.as_markup()
 
 def get_gifts_keyboard():
-    products = get_products_by_category_sync("gift_cards")
+    import sqlite3
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.execute("SELECT * FROM products WHERE category='gift_cards'")
+    products = cursor.fetchall()
+    conn.close()
     kb = InlineKeyboardBuilder()
     for prod in products:
         kb.button(text=f"{prod[1]} — {prod[3]} ₽", callback_data=f"buy_{prod[0]}_gift")
@@ -147,7 +150,11 @@ def get_gifts_keyboard():
     return kb.as_markup()
 
 def get_games_keyboard():
-    products = get_products_by_category_sync("game_donations")
+    import sqlite3
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.execute("SELECT * FROM products WHERE category='game_donations'")
+    products = cursor.fetchall()
+    conn.close()
     kb = InlineKeyboardBuilder()
     for prod in products:
         kb.button(text=f"{prod[1]} — {prod[3]} ₽", callback_data=f"buy_{prod[0]}_game")
@@ -162,14 +169,6 @@ def get_buy_keyboard(product_id, period=None, amount=None):
     kb.button(text="🔙 Назад", callback_data="back_catalog")
     kb.adjust(1)
     return kb.as_markup()
-
-def get_products_by_category_sync(category):
-    import sqlite3
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.execute("SELECT * FROM products WHERE category=?", (category,))
-    result = cursor.fetchall()
-    conn.close()
-    return result
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -263,9 +262,7 @@ async def confirm_purchase(callback: types.CallbackQuery):
     period = parts[2] if parts[2] != "none" else None
     amount = float(parts[3])
     user_id = callback.from_user.id
-    
     await create_order(user_id, product_id, period, amount)
-    
     product = await get_product_by_id(product_id)
     await callback.message.answer(f"✅ <b>Покупка оформлена!</b>\n\n{product[1]}\nПериод: {period or '—'}\nСумма: {amount} ₽\n\nМенеджер свяжется с вами в ближайшее время.", parse_mode="HTML")
     await callback.message.delete_reply_markup()
@@ -273,6 +270,9 @@ async def confirm_purchase(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "back_catalog")
 async def back_to_catalog_from_buy(callback: types.CallbackQuery):
     await callback.message.edit_text("Выберите категорию:", reply_markup=get_catalog_keyboard())
+
+async def health_check(request: web.Request):
+    return web.Response(text="OK", status=200)
 
 async def on_startup(app):
     await bot.set_webhook(WEBHOOK_URL)
@@ -288,6 +288,7 @@ async def handle_update(request: web.Request):
 async def main():
     await db_start()
     app = web.Application()
+    app.router.add_get("/", health_check)
     app.router.add_post("/webhook", handle_update)
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
